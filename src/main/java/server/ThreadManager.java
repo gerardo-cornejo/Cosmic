@@ -19,9 +19,10 @@
 */
 package server;
 
+import config.YamlConfig;
+
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Executors;
-import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 
@@ -42,25 +43,19 @@ public class ThreadManager {
 
     private ThreadManager() {}
 
-    private class RejectedExecutionHandlerImpl implements RejectedExecutionHandler {
-
-        @Override
-        public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
-            Thread t = new Thread(r);
-            t.start();
-        }
-
-    }
-
     public void newTask(Runnable r) {
         tpe.execute(r);
     }
 
     public void start() {
-        RejectedExecutionHandler reh = new RejectedExecutionHandlerImpl();
         ThreadFactory tf = Executors.defaultThreadFactory();
 
-        tpe = new ThreadPoolExecutor(20, 1000, 77, SECONDS, new ArrayBlockingQueue<>(50), tf, reh);
+        // Cola dimensionada para absorber picos legítimos (p. ej. desconexiones masivas)
+        // antes de que el pool tenga que crecer. Si aun así se desborda, CallerRunsPolicy
+        // aplica backpressure corriendo la tarea en el hilo llamador en vez de crear
+        // hilos ilimitados (evita la explosión de hilos).
+        int queueSize = Math.max(50, YamlConfig.config.server.CHANNEL_LOAD * YamlConfig.config.server.CHANNEL_SIZE);
+        tpe = new ThreadPoolExecutor(20, 1000, 77, SECONDS, new ArrayBlockingQueue<>(queueSize), tf, new ThreadPoolExecutor.CallerRunsPolicy());
     }
 
     public void stop() {
